@@ -1,0 +1,192 @@
+{% load to_decimical %}
+
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+
+<head>
+  <meta charset="utf-8">
+  <title>Карта зараженных - Нюрба</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <script src="https://yandex.st/jquery/2.2.3/jquery.min.js" type="text/javascript"></script>
+  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&amp;apikey=2c6dbbce-f261-4239-a86d-a6f33ed684c2" type="text/javascript"></script>
+  <style>
+    html, body, #map {
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      margin: 0;
+    }
+
+    a {
+      color: #04b;
+      /* Цвет ссылки */
+      text-decoration: none;
+      /* Убираем подчеркивание у ссылок */
+    }
+
+    a:visited {
+      color: #04b;
+      /* Цвет посещённой ссылки */
+    }
+
+    a:hover {
+      color: #f50000;
+      /* Цвет ссылки при наведении на нее курсора мыши */
+    }
+    .sick_add_form{
+
+    }
+    .form-group label{
+      text-align: right;
+    }
+    .form-group input{
+      width: 100%;
+      padding: 12px 20px;
+      margin: 8px 0;
+      box-sizing: border-box;
+    }
+    .form-group input[type=checkbox]{
+      height: 20px;
+      width: 20px;
+    }
+    .send_btn{
+      width: 200px;
+      background-color: #4CAF50; /* Green */
+      border: none;
+      color: white;
+      padding: 15px 32px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+    }
+  </style>
+
+</head>
+
+<body>
+  <div id='map'></div>
+</body>
+
+<script type="text/javascript">
+  ymaps.ready(function() {
+    var myMap = new ymaps.Map('map', {
+          center: [63.278463, 118.336617],
+          zoom: 13,
+          controls: ['zoomControl', 'typeSelector',  'fullscreenControl', 'routeButtonControl'],
+        }, {
+          searchControlProvider: 'yandex#search',
+          restrictMapArea: [[62.518754, 114.185805], [65.882065, 119.607401]],
+        }),
+
+      /**
+       * Функция возвращает объект, содержащий данные метки.
+       * Поле данных clusterCaption будет отображено в списке геообъектов в балуне кластера.
+       * Поле balloonContentBody - источник данных для контента балуна.
+       * Оба поля поддерживают HTML-разметку.
+       * Список полей данных, которые используют стандартные макеты содержимого иконки метки
+       * и балуна геообъектов, можно посмотреть в документации.
+       * @see https://api.yandex.ru/maps/doc/jsapi/2.1/ref/reference/GeoObject.xml
+       */
+      getPointData = function(index, attr) {
+        return {
+          balloonContentHeader: attr.get('is_exactly')=='True' ? 'Подтвержденный случай' : 'Контактный',
+          balloonContentBody: `<p>Выявлено ${attr.get('detection_date')}</p>`,
+          balloonContentFooter: attr.get('address'),
+          clusterCaption: `${attr.get('address')}`
+        };
+      },
+      /**
+       * Функция возвращает объект, содержащий опции метки.
+       * Все опции, которые поддерживают геообъекты, можно посмотреть в документации.
+       * @see https://api.yandex.ru/maps/doc/jsapi/2.1/ref/reference/GeoObject.xml
+       */
+      getPointOptions = function(attr) {
+        console.log(attr)
+        return {
+          preset: 'islands#circleIcon',
+          iconColor: attr.get('is_exactly') == 'True' ? 'red' : 'purple'
+        };
+      },
+
+      points = [
+        {% for id, val in points.items %}
+          [[{{val.1|to_decimical}}, {{val.0|to_decimical}}],
+            new Map([
+              ['is_exactly', '{{val.2.is_exactly}}'],
+              ['detection_date', '{{val.2.detection_date}}'],
+              ['address', '{{val.2.address}}'],
+            ])],
+        {% endfor %}
+      ],
+      geoObjects = [],
+
+      ButtonLayout = ymaps.templateLayoutFactory.createClass(`
+          <div style="background-color: white; padding: 5px 12px; border: 1px solid black; box-shadow: 0 0 10px rgba(0,0,0,0.5);">
+            <a href="/admin/" style="color: black"> Войти </a>
+          </div>
+        `),
+
+        button = new ymaps.control.Button({
+            options: {
+                layout: ButtonLayout,
+                maxWidth: [170, 190, 220]
+            }
+        });
+
+    myMap.controls.add(button, {
+        top: 5,
+        left: 5
+    });
+
+    for (var i = 0, len = points.length; i < len; i++) {
+      geoObjects[i] = new ymaps.Placemark(points[i][0], getPointData(i, points[i][1]), getPointOptions(points[i][1]));
+      myMap.geoObjects.add(geoObjects[i])
+    }
+
+
+    {% if request.user.is_staff %}
+    myMap.events.add('click', function (e) {
+        if (!myMap.balloon.isOpen()) {
+            var coords = e.get('coords');
+            myMap.balloon.open(coords, {
+                contentHeader:'Добавить случай',
+                contentBody: `
+                  <form class="sick_add_form" action="." method="post">
+                    {% csrf_token %}
+                    <div class="form-group">
+                      <label>ФИО</label>
+                      <input type="text" name="name" placeholder="Иванов Иван" required>
+                    </div>
+                    <div class="form-group">
+                      <label>Дата выявления</label>
+                      <input type="date" name="detection_date" required>
+                    </div>
+                    <div class="form-group">
+                      <label>Адрес</label>
+                      <input type="text" name="address" placeholder="г. Нюрба, ул. Короленко, 10" required>
+                    </div>
+                    <div class="form-group">
+                      <label>Зараженный</label>
+                      <input type="checkbox" name="is_exactly" placeholder="Иванов Иван">
+                    </div>
+                    <div class="form-group">
+                      <label for=""></label>
+                      <input class="send_btn" type="submit" name="send" value="Добавить">
+                    </div>
+                    <input type="text" name="latitude" value="${coords[0].toPrecision(6)}" hidden>
+                    <input type="text" name="longitude" value="${coords[1].toPrecision(6)}" hidden>
+                  </form>
+                `,
+            });
+        }
+        else {
+            myMap.balloon.close();
+        }
+    });
+
+    {% endif %}
+  });
+</script>
+
+</html>
